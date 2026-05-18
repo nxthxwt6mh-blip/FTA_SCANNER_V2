@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""
+FTA Card Analysis - Visualization Script (578-sample model)
+===========================================================
+Generates a 6-panel analysis dashboard from the full 578-sample FTA dataset.
+
+Dataset composition
+-------------------
+  570 unique samples parsed from photo batch (2025-578-photos, 5 duplicates removed)
+  + 8 retained legacy samples from original 232-sample model
+  = 578 total
+
+Duplicates removed (less-informative filename → kept filename):
+  FRANCE QX VV CT 28.5.jpg            → FRANCE SVAGIR1966 QX VV CT 28.5.jpg
+  Efra-0056.jpg                        → FRANCE AOBRO2001 793B FV CT 26.15.jpg
+  OMAN Spm01 4-91 VOV CT 23.13.jpg    → PTT OMAN Spm01 MASS CT 24.16 491 CT 18.06.jpg
+  GREECE Petaniths NEGATIVE.jpg        → GREECE Petaniths QX FV CT 29.39.jpg
+  GREECE Digalis NEGATIVE.jpg          → GRRECE Digalis 4-91 VV CT 30.09.jpg
+
+Requirements
+------------
+  pip install matplotlib numpy
+
+Usage
+-----
+  python fta_analysis_578.py
+  python fta_analysis_578.py --output my_report.png
+  python fta_analysis_578.py --dpi 300
+"""
+
+import argparse
+import json
+import statistics
+from collections import Counter, defaultdict
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EMBEDDED DATASET  (570 samples from photo batch)
+# Each record: {country, ct (float|null), negative (bool), strain (str|null)}
+# ─────────────────────────────────────────────────────────────────────────────
+_ZIP_SAMPLES_JSON = '''[{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BANGLADESH","ct":null,"negative":true,"strain":null},{"country":"BELGIUM","ct":28.92,"negative":false,"strain":"4-91"},{"country":"BELGIUM","ct":28.16,"negative":false,"strain":"4-91"},{"country":"BELGIUM","ct":26.8,"negative":false,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":false,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"BRAZIL","ct":null,"negative":true,"strain":null},{"country":"CHINA","ct":25.3,"negative":false,"strain":"GAMMACOV"},{"country":"CHINA","ct":25.7,"negative":false,"strain":"4-91"},{"country":"CHINA","ct":27.64,"negative":false,"strain":null},{"country":"CHINA","ct":26.01,"negative":false,"strain":"4-91"},{"country":"CHINA","ct":24.9,"negative":false,"strain":"793B"},{"country":"CHINA","ct":null,"negative":true,"strain":null},{"country":"CHINA","ct":26.85,"negative":false,"strain":"QX"},{"country":"CHINA","ct":21.57,"negative":false,"strain":"QX"},{"country":"CHINA","ct":26.6,"negative":false,"strain":"QX"},{"country":"CHINA","ct":27.14,"negative":false,"strain":"QX"},{"country":"CHINA","ct":23.8,"negative":false,"strain":null},{"country":"CHINA","ct":29.2,"negative":false,"strain":null},{"country":"CHINA","ct":27.2,"negative":false,"strain":null},{"country":"CHINA","ct":24.1,"negative":false,"strain":"QX"},{"country":"CHINA","ct":29.03,"negative":false,"strain":null},{"country":"CHINA","ct":25.79,"negative":false,"strain":null},{"country":"CHINA","ct":24.3,"negative":false,"strain":null},{"country":"CHINA","ct":27.4,"negative":false,"strain":null},{"country":"CHINA","ct":27.25,"negative":false,"strain":"793B"},{"country":"CHINA","ct":null,"negative":false,"strain":"4-91"},{"country":"CHINA","ct":20.28,"negative":false,"strain":"QX"},{"country":"CHINA","ct":19.93,"negative":false,"strain":"QX"},{"country":"CHINA","ct":25.16,"negative":false,"strain":null},{"country":"CHINA","ct":25.8,"negative":false,"strain":"QX"},{"country":"CHINA","ct":26.13,"negative":false,"strain":"QX"},{"country":"CHINA","ct":22.17,"negative":false,"strain":"QX"},{"country":"CHINA","ct":22.2,"negative":false,"strain":null},{"country":"CHINA","ct":25.5,"negative":false,"strain":null},{"country":"CHINA","ct":25.3,"negative":false,"strain":"QX"},{"country":"COLOMBIA","ct":30.63,"negative":true,"strain":"MASS"},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":22.5,"negative":false,"strain":null},{"country":"COLOMBIA","ct":28.8,"negative":false,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"COLOMBIA","ct":null,"negative":true,"strain":null},{"country":"CZECH","ct":null,"negative":true,"strain":null},{"country":"DENMAKR","ct":25.7,"negative":false,"strain":"1-96"},{"country":"DENMARK","ct":24.34,"negative":false,"strain":"1-96"},{"country":"DENMARK","ct":28.61,"negative":false,"strain":"1-96"},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":25.84,"negative":false,"strain":"4-91"},{"country":"DENMARK","ct":30.84,"negative":false,"strain":"4-91"},{"country":"DENMARK","ct":27.15,"negative":false,"strain":"793B"},{"country":"DENMARK","ct":23.08,"negative":false,"strain":"MASS"},{"country":"DENMARK","ct":30.0,"negative":false,"strain":"1-96"},{"country":"DENMARK","ct":27.4,"negative":false,"strain":"MASS"},{"country":"DENMARK","ct":null,"negative":false,"strain":null},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":25.6,"negative":false,"strain":null},{"country":"DENMARK","ct":21.5,"negative":false,"strain":"MASS"},{"country":"DENMARK","ct":23.3,"negative":true,"strain":"MASS"},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":30.0,"negative":false,"strain":"793B"},{"country":"DENMARK","ct":null,"negative":true,"strain":null},{"country":"DENMARK","ct":25.8,"negative":false,"strain":"793B"},{"country":"EGYPT","ct":14.16,"negative":false,"strain":"4-91"},{"country":"EGYPT","ct":28.41,"negative":false,"strain":"VAR2?"},{"country":"EGYPT","ct":17.69,"negative":false,"strain":null},{"country":"FGYPT","ct":24.23,"negative":false,"strain":"4-91"},{"country":"FINLAND","ct":29.9,"negative":false,"strain":"793B"},{"country":"FINLAND","ct":28.1,"negative":false,"strain":"MASS"},{"country":"FRANCE","ct":26.7,"negative":false,"strain":"1-96"},{"country":"FRANCE","ct":30.4,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":30.48,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":30.5,"negative":false,"strain":"CR88"},{"country":"FRANCE","ct":28.16,"negative":false,"strain":null},{"country":"FRANCE","ct":31.5,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":25.3,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":30.3,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":32.5,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":null,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":17.4,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":26.15,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":31.12,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":26.9,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":29.92,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":25.3,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":27.75,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":29.04,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":28.8,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":23.6,"negative":false,"strain":"CR88"},{"country":"FRANCE","ct":29.8,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":27.3,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":25.6,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":26.8,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":27.8,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":24.8,"negative":false,"strain":null},{"country":"FRANCE","ct":23.0,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":27.2,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":27.67,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":29.2,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":28.4,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":25.96,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":28.4,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":25.5,"negative":false,"strain":"QX"},{"country":"FRANCE","ct":31.26,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":29.63,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":33.29,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":32.89,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":30.84,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":32.23,"negative":false,"strain":"793B"},{"country":"FRANCE","ct":32.4,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":28.98,"negative":false,"strain":"QX"},{"country":"FRANCE","ct":29.92,"negative":false,"strain":"QX"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":29.56,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":28.19,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":25.12,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":28.5,"negative":false,"strain":"QX"},{"country":"FRANCE","ct":null,"negative":true,"strain":null},{"country":"FRANCE","ct":22.77,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":24.02,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":31.74,"negative":false,"strain":"4-91"},{"country":"FRANCE","ct":26.37,"negative":false,"strain":"1-96"},{"country":"FRANCE","ct":27.89,"negative":false,"strain":"793B"},{"country":"GERMANY","ct":null,"negative":true,"strain":null},{"country":"GREECE","ct":29.6,"negative":false,"strain":"793B"},{"country":"GREECE","ct":null,"negative":true,"strain":null},{"country":"GREECE","ct":29.14,"negative":false,"strain":"1-96"},{"country":"GREECE","ct":24.09,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":27.02,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":28.9,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":26.7,"negative":false,"strain":"1-96"},{"country":"GREECE","ct":27.02,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":28.55,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":null,"negative":true,"strain":null},{"country":"GREECE","ct":null,"negative":true,"strain":null},{"country":"GREECE","ct":27.05,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":23.2,"negative":false,"strain":"4-91"},{"country":"GREECE","ct":29.39,"negative":false,"strain":"QX"},{"country":"GREECE","ct":30.09,"negative":false,"strain":"4-91"},{"country":"HUNGARY","ct":20.33,"negative":false,"strain":"4-91"},{"country":"HUNGARY","ct":22.82,"negative":false,"strain":"4-91"},{"country":"INDONESIA","ct":24.84,"negative":false,"strain":"QX"},{"country":"INDONESIA","ct":null,"negative":true,"strain":null},{"country":"IRAQ","ct":31.7,"negative":false,"strain":"VAR2?"},{"country":"IRELAND","ct":23.8,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":26.2,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":27.6,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":17.4,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":28.7,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":27.87,"negative":false,"strain":"MASS"},{"country":"IRELAND","ct":28.4,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":28.0,"negative":false,"strain":"793B"},{"country":"IRELAND","ct":22.85,"negative":false,"strain":"MASS"},{"country":"IRELAND","ct":26.9,"negative":false,"strain":"MASS"},{"country":"IRELAND","ct":null,"negative":true,"strain":null},{"country":"IRELAND","ct":null,"negative":true,"strain":null},{"country":"IRELAND","ct":null,"negative":true,"strain":null},{"country":"IRELAND","ct":null,"negative":true,"strain":null},{"country":"IRELAND","ct":null,"negative":true,"strain":null},{"country":"IRELAND","ct":28.2,"negative":false,"strain":"793B"},{"country":"IRLAND","ct":null,"negative":true,"strain":null},{"country":"IRLEAND","ct":24.32,"negative":false,"strain":"793B"},{"country":"IRLEAND","ct":null,"negative":true,"strain":null},{"country":"IRLEAND","ct":null,"negative":true,"strain":null},{"country":"JAPA","ct":25.5,"negative":false,"strain":"4-91"},{"country":"JAPA","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":28.3,"negative":false,"strain":null},{"country":"JAPAN","ct":31.23,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":29.98,"negative":false,"strain":"QX"},{"country":"JAPAN","ct":28.65,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":27.95,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":24.9,"negative":true,"strain":"MASS"},{"country":"JAPAN","ct":28.84,"negative":false,"strain":"MASS"},{"country":"JAPAN","ct":17.9,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":24.2,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":false,"strain":"GAMMACOV"},{"country":"JAPAN","ct":26.8,"negative":false,"strain":"QX"},{"country":"JAPAN","ct":29.5,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":30.1,"negative":false,"strain":"4-91"},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JAPAN","ct":null,"negative":true,"strain":null},{"country":"JORDAN","ct":21.0,"negative":false,"strain":"VAR2?"},{"country":"JORDAN","ct":27.96,"negative":false,"strain":"VAR2?"},{"country":"JORDAN","ct":null,"negative":true,"strain":null},{"country":"MALAYISA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":28.9,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":24.4,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":30.6,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":22.69,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":25.72,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":28.14,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":28.2,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":26.39,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":28.3,"negative":false,"strain":"793B"},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALAYSIA","ct":28.31,"negative":false,"strain":"QX"},{"country":"MALAYSIA","ct":27.64,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":25.25,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":28.7,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":30.45,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":27.64,"negative":false,"strain":"4-91"},{"country":"MALAYSIA","ct":26.01,"negative":false,"strain":null},{"country":"MALAYSIA","ct":null,"negative":true,"strain":null},{"country":"MALSYSIA","ct":null,"negative":true,"strain":null},{"country":"MALYASIA","ct":null,"negative":true,"strain":null},{"country":"MAYALSIA","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":31.83,"negative":false,"strain":"4-91"},{"country":"MEXICO","ct":29.85,"negative":false,"strain":null},{"country":"MEXICO","ct":23.95,"negative":false,"strain":"MASS"},{"country":"MEXICO","ct":29.37,"negative":false,"strain":"VAR2?"},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":31.7,"negative":false,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":27.87,"negative":false,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":29.84,"negative":false,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":27.82,"negative":false,"strain":null},{"country":"MEXICO","ct":30.0,"negative":false,"strain":"4-91"},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":32.76,"negative":false,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":21.7,"negative":false,"strain":null},{"country":"MEXICO","ct":29.04,"negative":false,"strain":"MASS"},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":true,"strain":null},{"country":"MEXICO","ct":null,"negative":false,"strain":null},{"country":"MORROCCO","ct":26.4,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":null,"negative":true,"strain":null},{"country":"OMAN","ct":27.9,"negative":false,"strain":null},{"country":"OMAN","ct":30.16,"negative":false,"strain":null},{"country":"OMAN","ct":26.23,"negative":false,"strain":"VAR2?"},{"country":"OMAN","ct":21.5,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":26.99,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":25.04,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":24.36,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":25.15,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":26.72,"negative":false,"strain":null},{"country":"OMAN","ct":26.11,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":26.8,"negative":false,"strain":"4-91"},{"country":"OMAN","ct":23.87,"negative":false,"strain":"4-91"},{"country":"PERU","ct":null,"negative":true,"strain":null},{"country":"PERU","ct":null,"negative":true,"strain":null},{"country":"PERU","ct":23.9,"negative":false,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":29.7,"negative":false,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":27.325,"negative":false,"strain":null},{"country":"PHILIPPINES","ct":32.48,"negative":false,"strain":"4-91"},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":25.87,"negative":false,"strain":"1-96"},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"PHILIPPINES","ct":null,"negative":true,"strain":null},{"country":"POLAND","ct":27.9,"negative":false,"strain":"QX"},{"country":"POLAND","ct":25.4,"negative":false,"strain":"4-91"},{"country":"POLAND","ct":28.09,"negative":false,"strain":"793B"},{"country":"POLAND","ct":null,"negative":true,"strain":null},{"country":"POLAND","ct":28.12,"negative":false,"strain":"793B"},{"country":"POLAND","ct":31.57,"negative":false,"strain":"1-96"},{"country":"POLAND","ct":30.14,"negative":false,"strain":"VAR2?"},{"country":"PTT","ct":25.8,"negative":false,"strain":"MASS"},{"country":"PTT","ct":25.77,"negative":true,"strain":"MASS"},{"country":"PTT","ct":null,"negative":true,"strain":"MASS"},{"country":"PTT","ct":24.79,"negative":false,"strain":"MASS"},{"country":"PTT","ct":20.79,"negative":false,"strain":"MASS"},{"country":"PTT","ct":21.42,"negative":false,"strain":"MASS"},{"country":"PTT","ct":22.45,"negative":false,"strain":"MASS"},{"country":"PTT","ct":22.8,"negative":false,"strain":"MASS"},{"country":"PTT","ct":27.4,"negative":false,"strain":"MASS"},{"country":"PTT","ct":28.38,"negative":false,"strain":"MASS"},{"country":"PTT","ct":30.4,"negative":true,"strain":"MASS"},{"country":"PTT","ct":18.4,"negative":false,"strain":"MASS"},{"country":"PTT","ct":27.66,"negative":true,"strain":"MASS"},{"country":"PTT","ct":23.7,"negative":true,"strain":"MASS"},{"country":"PTT","ct":28.79,"negative":false,"strain":"MASS"},{"country":"PTT","ct":26.72,"negative":false,"strain":"MASS"},{"country":"PTT","ct":24.75,"negative":false,"strain":"MASS"},{"country":"PTT","ct":19.44,"negative":true,"strain":"MASS"},{"country":"PTT","ct":null,"negative":true,"strain":null},{"country":"PTT","ct":null,"negative":true,"strain":"MASS"},{"country":"PTT","ct":27.0,"negative":false,"strain":"MASS"},{"country":"PTT","ct":21.18,"negative":false,"strain":"MASS"},{"country":"PTT","ct":21.3,"negative":false,"strain":"MASS"},{"country":"PTT","ct":28.1,"negative":false,"strain":"MASS"},{"country":"PTT","ct":28.5,"negative":false,"strain":"MASS"},{"country":"PTT","ct":24.16,"negative":false,"strain":"MASS"},{"country":"PTT","ct":29.91,"negative":false,"strain":"MASS"},{"country":"PTT","ct":28.38,"negative":false,"strain":"MASS"},{"country":"PTT","ct":26.93,"negative":true,"strain":"MASS"},{"country":"PTT","ct":25.14,"negative":false,"strain":"MASS"},{"country":"PTT","ct":33.7,"negative":false,"strain":"MASS"},{"country":"PTT","ct":27.8,"negative":false,"strain":"MASS"},{"country":"PTT","ct":24.49,"negative":true,"strain":"MASS"},{"country":"PTT","ct":26.6,"negative":false,"strain":"MASS"},{"country":"PTT","ct":31.0,"negative":false,"strain":"MASS"},{"country":"PTT","ct":24.06,"negative":false,"strain":"MASS"},{"country":"PTT","ct":26.3,"negative":false,"strain":"MASS"},{"country":"PTT","ct":25.55,"negative":false,"strain":"MASS"},{"country":"ROMANIA","ct":null,"negative":true,"strain":null},{"country":"ROMANIA","ct":26.24,"negative":false,"strain":"VAR2?"},{"country":"ROMANIA","ct":29.56,"negative":false,"strain":"793B"},{"country":"ROMANIA","ct":24.59,"negative":false,"strain":"4-91"},{"country":"ROMANIA","ct":null,"negative":true,"strain":null},{"country":"ROMANIA","ct":28.11,"negative":false,"strain":"VAR2?"},{"country":"ROMANIA","ct":null,"negative":true,"strain":null},{"country":"ROMANIA","ct":27.7,"negative":false,"strain":"MASS"},{"country":"SOUTH AFRICA","ct":27.4,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":28.7,"negative":false,"strain":null},{"country":"SOUTH AFRICA","ct":26.0,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":29.7,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":26.6,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":31.2,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.0,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":24.0,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":27.4,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":23.38,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":23.8,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":22.7,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":25.0,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":null,"negative":true,"strain":null},{"country":"SOUTH AFRICA","ct":28.5,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":27.9,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":24.7,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":29.07,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":25.8,"negative":false,"strain":null},{"country":"SOUTH AFRICA","ct":24.3,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":23.9,"negative":false,"strain":"VAR2?"},{"country":"SOUTH AFRICA","ct":27.13,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":24.78,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":27.8,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.7,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.9,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":29.8,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.2,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.06,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":null,"negative":true,"strain":null},{"country":"SOUTH AFRICA","ct":null,"negative":true,"strain":null},{"country":"SOUTH AFRICA","ct":null,"negative":true,"strain":null},{"country":"SOUTH AFRICA","ct":27.2,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":30.0,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":30.0,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":27.42,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":30.78,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":28.77,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":31.66,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":24.14,"negative":false,"strain":"4-91"},{"country":"SOUTH AFRICA","ct":null,"negative":true,"strain":null},{"country":"SOUTH AFRICA","ct":22.7,"negative":false,"strain":"1-96"},{"country":"SOUTH","ct":null,"negative":true,"strain":null},{"country":"SPAIN","ct":null,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":31.3,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.7,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.5,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":32.2,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":31.4,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.9,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":28.4,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":27.9,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.4,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":null,"negative":true,"strain":null},{"country":"SPAIN","ct":29.5,"negative":false,"strain":"1-96"},{"country":"SPAIN","ct":29.4,"negative":false,"strain":"1-96"},{"country":"SPAIN","ct":25.9,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.97,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.8,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":29.9,"negative":false,"strain":"1-96"},{"country":"SPAIN","ct":29.65,"negative":false,"strain":"4-91"},{"country":"SPAIN","ct":24.4,"negative":false,"strain":"4-91"},{"country":"SWEDEN","ct":27.4,"negative":false,"strain":"4-91"},{"country":"SWEDEN","ct":29.5,"negative":false,"strain":"793B"},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWEDEN","ct":null,"negative":true,"strain":null},{"country":"SWITZERLAND","ct":null,"negative":true,"strain":null},{"country":"TURKEY","ct":23.29,"negative":false,"strain":"VAR2?"},{"country":"TURKEY","ct":28.5,"negative":false,"strain":"IBV"},{"country":"TURKIKE","ct":22.5491,"negative":false,"strain":"MASS"},{"country":"TURKIYE","ct":24.5,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":28.9,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":28.8,"negative":false,"strain":null},{"country":"TURKIYE","ct":25.02,"negative":false,"strain":"CR88"},{"country":"TURKIYE","ct":22.25,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":27.02,"negative":false,"strain":"CR88"},{"country":"TURKIYE","ct":29.63,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":25.04,"negative":false,"strain":null},{"country":"TURKIYE","ct":24.2,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":25.66,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":22.92,"negative":false,"strain":"VAR2?"},{"country":"TURKIYE","ct":21.0,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":24.92,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":20.1,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":26.6,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":22.2,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":16.7,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":28.5,"negative":false,"strain":"IBV"},{"country":"TURKIYE","ct":27.19,"negative":false,"strain":"4-91"},{"country":"TURKIYE","ct":29.3,"negative":false,"strain":"1-96"},{"country":"TURKIYE","ct":23.6,"negative":false,"strain":"QX"},{"country":"TURKIYE","ct":22.41,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":23.24,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":20.4,"negative":true,"strain":"MASS"},{"country":"TURKIYE","ct":38.5,"negative":false,"strain":"MASS"},{"country":"TURKIYE","ct":26.04,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":25.18,"negative":false,"strain":"GAMMACOV"},{"country":"TURKIYE","ct":26.9,"negative":false,"strain":"VAR2?"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":28.3,"negative":false,"strain":"4-91"},{"country":"UK","ct":28.8,"negative":false,"strain":null},{"country":"UK","ct":28.86,"negative":false,"strain":"793B"},{"country":"UK","ct":29.7,"negative":false,"strain":"793B"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":30.14,"negative":false,"strain":"4-91"},{"country":"UK","ct":29.05,"negative":false,"strain":"4-91"},{"country":"UK","ct":21.2,"negative":false,"strain":"4-91"},{"country":"UK","ct":17.38,"negative":false,"strain":"4-91"},{"country":"UK","ct":28.13,"negative":false,"strain":"4-91"},{"country":"UK","ct":26.4,"negative":false,"strain":"4-91"},{"country":"UK","ct":26.38,"negative":false,"strain":"4-91"},{"country":"UK","ct":26.87,"negative":false,"strain":"4-91"},{"country":"UK","ct":30.07,"negative":false,"strain":"4-91"},{"country":"UK","ct":25.7,"negative":false,"strain":"4-91"},{"country":"UK","ct":20.66,"negative":false,"strain":"4-91"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":30.25,"negative":false,"strain":"4-91"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":18.78,"negative":false,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":28.4,"negative":false,"strain":"MASS"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":28.19,"negative":true,"strain":"MASS"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":30.95,"negative":false,"strain":null},{"country":"UK","ct":24.21,"negative":false,"strain":null},{"country":"UK","ct":25.83,"negative":false,"strain":"4-91"},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":28.5,"negative":false,"strain":"4-91"},{"country":"UK","ct":29.5,"negative":false,"strain":"793B"},{"country":"UK","ct":30.31,"negative":false,"strain":null},{"country":"UK","ct":null,"negative":false,"strain":null},{"country":"UK","ct":26.5,"negative":false,"strain":"4-91"},{"country":"UK","ct":26.16,"negative":false,"strain":"4-91"},{"country":"UK","ct":30.4,"negative":false,"strain":"793B"},{"country":"UK","ct":26.4,"negative":false,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":null,"negative":true,"strain":null},{"country":"UK","ct":24.16,"negative":false,"strain":"4-91"},{"country":"UK","ct":null,"negative":false,"strain":"4-91"},{"country":"UK","ct":31.5,"negative":false,"strain":"4-91"},{"country":"UK","ct":29.3,"negative":false,"strain":"793B"},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":24.01,"negative":false,"strain":null},{"country":"VIETNAM","ct":26.72,"negative":false,"strain":"4-91"},{"country":"VIETNAM","ct":29.26,"negative":false,"strain":"4-91"},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":26.78,"negative":false,"strain":"4-91"},{"country":"VIETNAM","ct":27.34,"negative":false,"strain":"4-91"},{"country":"VIETNAM","ct":32.0,"negative":false,"strain":"QX"},{"country":"VIETNAM","ct":26.09,"negative":false,"strain":"QX"},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":null,"negative":true,"strain":null},{"country":"VIETNAM","ct":null,"negative":true,"strain":null}]'''
+
+_LEGACY_SAMPLES = [
+    # 8 samples retained from original 232-sample model not present in zip batch
+    {"country": "FRANCE",       "ct": 25.3,  "negative": False, "strain": "MASS"},
+    {"country": "TURKIYE",      "ct": 27.1,  "negative": False, "strain": "793B"},
+    {"country": "OMAN",         "ct": 24.8,  "negative": False, "strain": "4-91"},
+    {"country": "DENMARK",      "ct": 26.4,  "negative": False, "strain": "QX"},
+    {"country": "UK",           "ct": None,  "negative": True,  "strain": None},
+    {"country": "MEXICO",       "ct": 28.2,  "negative": False, "strain": "MASS"},
+    {"country": "PHILIPPINES",  "ct": 25.9,  "negative": False, "strain": "4-91"},
+    {"country": "DENMARK",      "ct": None,  "negative": True,  "strain": None},
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLOUR PALETTE
+# ─────────────────────────────────────────────────────────────────────────────
+C_HIST          = "#AED6F1"
+C_POS           = "#E8A09A"
+C_NEG           = "#AED6F1"
+C_MEAN          = "#E74C3C"
+C_MEDIAN        = "#F39C12"
+BUCKET_COLORS   = ["#8B0000", "#E69010", "#F0C040", "#E07070"]
+HEADER_COLOR    = "#1F3864"
+ROW_ALT_COLOR   = "#EBF5FB"
+
+BUCKET_ORDER = ["Very Low\n(<20)", "Low\n(20-25)", "Medium\n(25-30)", "High\n(≥30)"]
+
+
+def ct_bucket(value: float) -> str:
+    if value < 20:  return "Very Low\n(<20)"
+    if value < 25:  return "Low\n(20-25)"
+    if value < 30:  return "Medium\n(25-30)"
+    return "High\n(≥30)"
+
+
+def load_dataset() -> list[dict]:
+    """Return the complete 578-sample dataset."""
+    samples = json.loads(_ZIP_SAMPLES_JSON) + _LEGACY_SAMPLES
+    assert len(samples) == 578, f"Expected 578 samples, got {len(samples)}"
+    return samples
+
+
+def compute_stats(samples: list[dict]) -> dict:
+    """Aggregate all statistics needed for the dashboard."""
+    ct_vals = [s["ct"] for s in samples if s["ct"] is not None]
+    return {
+        "total":          len(samples),
+        "total_pos":      sum(1 for s in samples if not s["negative"]),
+        "total_neg":      sum(1 for s in samples if s["negative"]),
+        "ct_vals":        ct_vals,
+        "mean_ct":        statistics.mean(ct_vals),
+        "median_ct":      statistics.median(ct_vals),
+        "std_ct":         statistics.stdev(ct_vals),
+        "min_ct":         min(ct_vals),
+        "max_ct":         max(ct_vals),
+        "n_countries":    len({s["country"] for s in samples}),
+        "strain_counts":  Counter(s["strain"] for s in samples if s["strain"]),
+        "country_counts": Counter(s["country"] for s in samples),
+        "country_pos":    Counter(s["country"] for s in samples if not s["negative"]),
+        "country_neg":    Counter(s["country"] for s in samples if s["negative"]),
+        "bucket_counts":  Counter(ct_bucket(v) for v in ct_vals),
+        "strain_ct_data": _build_strain_ct(samples),
+    }
+
+
+def _build_strain_ct(samples: list[dict]) -> dict[str, list[float]]:
+    data: dict[str, list] = defaultdict(list)
+    for s in samples:
+        if s["strain"] and s["ct"] is not None:
+            data[s["strain"]].append(s["ct"])
+    return dict(data)
+
+
+def plot_ct_histogram(ax, stats: dict) -> None:
+    ax.hist(stats["ct_vals"], bins=28, color=C_HIST, edgecolor="white", linewidth=0.5)
+    ax.axvline(stats["mean_ct"],   color=C_MEAN,   linestyle="--", lw=1.5,
+               label=f'Mean: {stats["mean_ct"]:.2f}')
+    ax.axvline(stats["median_ct"], color=C_MEDIAN, linestyle="--", lw=1.5,
+               label=f'Median: {stats["median_ct"]:.2f}')
+    ax.set_title("Distribution of CT Values", fontsize=11)
+    ax.set_xlabel("CT Value")
+    ax.set_ylabel("Frequency")
+    ax.legend(fontsize=8)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def plot_ct_range_bars(ax, stats: dict) -> None:
+    b_vals = [stats["bucket_counts"].get(b, 0) for b in BUCKET_ORDER]
+    bars = ax.bar(BUCKET_ORDER, b_vals, color=BUCKET_COLORS, edgecolor="white", width=0.6)
+    for bar, v in zip(bars, b_vals):
+        ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.8,
+                str(v), ha="center", va="bottom", fontweight="bold", fontsize=10)
+    ax.set_title("Sample Distribution by CT Range", fontsize=11)
+    ax.set_xlabel("CT Value Range")
+    ax.set_ylabel("Number of Samples")
+    ax.set_ylim(0, max(b_vals) * 1.15)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def plot_country_bars(ax, stats: dict) -> None:
+    top10 = stats["country_counts"].most_common(10)
+    names = [c for c, _ in top10]
+    pos_v = [stats["country_pos"][c] for c in names]
+    neg_v = [stats["country_neg"][c] for c in names]
+    x, w = np.arange(len(names)), 0.35
+    ax.bar(x - w / 2, pos_v, w, color=C_POS, label="Positive")
+    ax.bar(x + w / 2, neg_v, w, color=C_NEG, label="Negative")
+    labels = [n.replace("SOUTH AFRICA", "S.AFRICA") for n in names]
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, rotation=45, ha="right", fontsize=7.5)
+    ax.set_title("Top 10 Countries: Positive vs Negative", fontsize=11)
+    ax.set_xlabel("Country")
+    ax.set_ylabel("Number of Samples")
+    ax.legend(fontsize=8)
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def plot_strain_pie(ax, stats: dict) -> None:
+    strain_sorted = stats["strain_counts"].most_common()
+    labels = [k for k, _ in strain_sorted]
+    sizes  = [v for _, v in strain_sorted]
+    colors = plt.cm.Set3(np.linspace(0, 1, len(strain_sorted)))
+    _, _, autotexts = ax.pie(
+        sizes, labels=labels, autopct="%1.1f%%",
+        colors=colors, startangle=140, pctdistance=0.75,
+        textprops={"fontsize": 8},
+    )
+    for at in autotexts:
+        at.set_fontsize(7.5)
+    ax.set_title("Distribution of Strain Types", fontsize=11)
+
+
+def plot_strain_boxplot(ax, stats: dict) -> None:
+    scd = stats["strain_ct_data"]
+    strains = [k for k, v in sorted(scd.items(), key=lambda x: -len(x[1])) if len(v) >= 3]
+    bp = ax.boxplot(
+        [scd[s] for s in strains],
+        patch_artist=True,
+        medianprops={"color": "black", "linewidth": 2},
+    )
+    colors = plt.cm.Pastel1(np.linspace(0, 1, len(strains)))
+    for patch, color in zip(bp["boxes"], colors):
+        patch.set_facecolor(color)
+    ax.set_xticklabels(strains, rotation=35, ha="right", fontsize=8)
+    ax.set_title("CT Value Distribution by Strain Type", fontsize=11)
+    ax.set_xlabel("Strain Type")
+    ax.set_ylabel("CT Value")
+    ax.grid(axis="y", alpha=0.3)
+    ax.spines[["top", "right"]].set_visible(False)
+
+
+def plot_summary_table(ax, stats: dict) -> None:
+    ax.axis("off")
+    rows = [
+        ["Total Samples",      str(stats["total"])],
+        ["Positive Samples",   str(stats["total_pos"])],
+        ["Negative Samples",   str(stats["total_neg"])],
+        ["Countries",          str(stats["n_countries"])],
+        ["Unique Strains",     str(len(stats["strain_counts"]))],
+        ["Mean CT",            f'{stats["mean_ct"]:.2f}'],
+        ["Median CT",          f'{stats["median_ct"]:.2f}'],
+        ["CT Range",           f'{stats["min_ct"]:.2f} – {stats["max_ct"]:.2f}'],
+        ["Std Deviation",      f'{stats["std_ct"]:.2f}'],
+        ["Duplicates Removed", "5"],
+    ]
+    ax.text(0.5, 0.97, "Summary Statistics", transform=ax.transAxes,
+            fontsize=12, fontweight="bold", ha="center", va="top")
+    table = ax.table(
+        cellText=rows,
+        colLabels=["Metric", "Value"],
+        cellLoc="center",
+        loc="center",
+        bbox=[0, 0.02, 1, 0.88],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    for (r, c), cell in table.get_celld().items():
+        if r == 0:
+            cell.set_facecolor(HEADER_COLOR)
+            cell.set_text_props(color="white", fontweight="bold")
+        elif r % 2 == 0:
+            cell.set_facecolor(ROW_ALT_COLOR)
+        else:
+            cell.set_facecolor("white")
+        cell.set_edgecolor("#CCCCCC")
+
+
+def build_dashboard(output_path: str = "fta_analysis_578.png", dpi: int = 150) -> None:
+    """Build and save the full 6-panel dashboard."""
+    samples = load_dataset()
+    stats   = compute_stats(samples)
+
+    fig = plt.figure(figsize=(18, 10))
+    fig.patch.set_facecolor("white")
+    fig.suptitle(
+        "FTA Card Analysis: CT Values vs Visual Characteristics",
+        fontsize=15, fontweight="bold", y=0.98,
+    )
+
+    gs = fig.add_gridspec(2, 3, hspace=0.42, wspace=0.38,
+                          left=0.06, right=0.97, top=0.92, bottom=0.07)
+
+    plot_ct_histogram   (fig.add_subplot(gs[0, 0]), stats)
+    plot_ct_range_bars  (fig.add_subplot(gs[0, 1]), stats)
+    plot_country_bars   (fig.add_subplot(gs[0, 2]), stats)
+    plot_strain_pie     (fig.add_subplot(gs[1, 0]), stats)
+    plot_strain_boxplot (fig.add_subplot(gs[1, 1]), stats)
+    plot_summary_table  (fig.add_subplot(gs[1, 2]), stats)
+
+    plt.savefig(output_path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+
+    s = stats
+    print(f"Saved: {output_path}")
+    print(f"Total={s['total']}  Positive={s['total_pos']}  Negative={s['total_neg']}")
+    print(f"Countries={s['n_countries']}  Strains={len(s['strain_counts'])}")
+    print(f"CT  mean={s['mean_ct']:.2f}  median={s['median_ct']:.2f}  "
+          f"std={s['std_ct']:.2f}  range={s['min_ct']:.2f}–{s['max_ct']:.2f}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="FTA Card Analysis – 578-sample model")
+    parser.add_argument("--output", default="fta_analysis_578.png",
+                        help="Output image path (default: fta_analysis_578.png)")
+    parser.add_argument("--dpi",    type=int, default=150,
+                        help="Output resolution in DPI (default: 150)")
+    args = parser.parse_args()
+    build_dashboard(output_path=args.output, dpi=args.dpi)
+
+
+if __name__ == "__main__":
+    main()
